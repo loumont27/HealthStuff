@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Health Records</title>
+<style>
+body {
+  font-family: Arial, sans-serif;
+  margin: 20px;
+  max-width: 1100px;
+}
+h1 { text-align: center; }
+
+section {
+  margin-bottom: 30px;
+  padding: 15px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+}
+
+form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+input, textarea, select, button {
+  padding: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+button {
+  background: #4CAF50;
+  color: white;
+  border: none;
+  cursor: pointer;
+}
+
+button:hover { background: #45a049; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+th, td {
+  border: 1px solid #ddd;
+  padding: 6px;
+}
+
+th input {
+  width: 95%;
+  padding: 4px;
+  margin-top: 4px;
+}
+
+tr:nth-child(even) { background-color: #f2f2f2; }
+
+.view-toggle {
+  margin-bottom: 15px;
+}
+
+.record-card {
+  border: 1px solid #ccc;
+  padding: 12px;
+  margin-bottom: 12px;
+  border-radius: 6px;
+  background: #f9f9f9;
+}
+
+.line1 {
+  font-weight: bold;
+  margin-bottom: 6px;
+}
+
+.line2, .line3, .line4 {
+  margin-bottom: 4px;
+}
+
+@media(max-width: 768px) {
+  form { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<h1>Health Records</h1>
+
+<section id="authSection">
+<h2>Login</h2>
+<form id="loginForm">
+  <input type="email" id="email" placeholder="Email" required>
+  <input type="password" id="password" placeholder="Password" required>
+  <button type="submit">Login</button>
+</form>
+<button id="logoutBtn" style="display:none;">Logout</button>
+<p id="authStatus"></p>
+</section>
+
+<section>
+<h2>Add Event</h2>
+<form id="eventForm">
+  <!-- EVENT TYPE DROPDOWN -->
+  <select name="event_type" required>
+    <option value="">Select Event Type</option>
+    <option value="Appointment">Appointment</option>
+    <option value="Test">Test</option>
+    <option value="Procedure">Procedure</option>
+    <option value="Consultation">Consultation</option>
+    <option value="Emergency">Emergency</option>
+    <option value="Medication Change">Medication Change</option>
+  </select>
+
+  <input type="date" name="event_date" required>
+  <input type="text" name="doctor_provider" placeholder="Doctor / Provider">
+  <input type="text" name="location" placeholder="Location">
+  <textarea name="general_note" placeholder="General Note"></textarea>
+  <input type="text" name="outcome" placeholder="Outcome">
+  <input type="text" name="follow_up_action" placeholder="Follow-up Action">
+  <button type="submit">Add Record</button>
+</form>
+</section>
+
+<section>
+<h2>Records</h2>
+
+<div class="view-toggle">
+  <button id="gridViewBtn">Grid View</button>
+  <button id="formViewBtn">Form View</button>
+</div>
+
+<!-- GRID VIEW -->
+<div id="gridView">
+  <table id="recordsTable">
+    <thead>
+      <tr>
+        <th>Event Type<br><input data-col="event_type"></th>
+        <th>Date<br><input data-col="event_date"></th>
+        <th>Doctor<br><input data-col="doctor_provider"></th>
+        <th>Location<br><input data-col="location"></th>
+        <th>Note<br><input data-col="general_note"></th>
+        <th>Outcome<br><input data-col="outcome"></th>
+        <th>Follow-up<br><input data-col="follow_up_action"></th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<!-- FORM VIEW -->
+<div id="formView" style="display:none;"></div>
+
+</section>
+
+<script type="module">
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const SUPABASE_URL = "https://nssnhxtdmryuudgfufif.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_MOp5lO5887AmTzwAhLoaOg_W81WZw0-";
+
+const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const tableName = "events";
+
+const loginForm = document.getElementById("loginForm");	
+const logoutBtn = document.getElementById("logoutBtn");
+const authStatus = document.getElementById("authStatus");
+const eventForm = document.getElementById("eventForm");
+const tbody = document.querySelector("#recordsTable tbody");
+const formView = document.getElementById("formView");
+const gridView = document.getElementById("gridView");
+
+checkSession();
+
+async function checkSession() {
+  const { data } = await client.auth.getSession();
+  if (data.session) {
+    authStatus.textContent = "Logged in as " + data.session.user.email;
+    loginForm.style.display = "none";
+    logoutBtn.style.display = "block";
+    loadRecords();
+  } else {
+    authStatus.textContent = "Not logged in";
+    loginForm.style.display = "block";
+    logoutBtn.style.display = "none";
+  }
+}
+
+loginForm.addEventListener("submit", async e => {
+  e.preventDefault();
+  const email = document.getElementById("email").value;
+  const password = document.getElementById("password").value;
+
+  const { error } = await client.auth.signInWithPassword({ email, password });
+
+  if (error) alert(error.message);
+  else checkSession();
+});
+
+logoutBtn.addEventListener("click", async () => {
+  await client.auth.signOut();
+  location.reload();
+});
+
+eventForm.addEventListener("submit", async e => {
+  e.preventDefault();
+  const formData = Object.fromEntries(new FormData(eventForm));
+
+  const { error } = await client.from(tableName).insert([formData]);
+
+  if (error) alert(error.message);
+  else {
+    eventForm.reset();
+    loadRecords();
+  }
+});
+
+async function loadRecords(filters = {}) {
+  let query = client.from(tableName).select("*");
+
+  for (const col in filters) {
+    if (filters[col]) {
+      query = query.ilike(col, `%${filters[col]}%`);
+    }
+  }
+
+  const { data, error } = await query.order("event_date", { ascending: false });
+
+  if (error) {
+    console.error(error);
+    return;
+  }
+
+  renderGrid(data);
+  renderFormView(data);
+}
+
+function renderGrid(data) {
+  tbody.innerHTML = "";
+  data.forEach(row => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${row.event_type || ""}</td>
+      <td>${row.event_date || ""}</td>
+      <td>${row.doctor_provider || ""}</td>
+      <td>${row.location || ""}</td>
+      <td>${row.general_note || ""}</td>
+      <td>${row.outcome || ""}</td>
+      <td>${row.follow_up_action || ""}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderFormView(data) {
+  formView.innerHTML = "";
+  data.forEach(row => {
+    const card = document.createElement("div");
+    card.className = "record-card";
+    card.innerHTML = `
+      <div class="line1">
+        ${row.event_type || ""} | ${row.event_date || ""} | ${row.doctor_provider || ""} | ${row.location || ""}
+      </div>
+      <div class="line2"><strong>Notes:</strong> ${row.general_note || ""}</div>
+      <div class="line3"><strong>Outcome:</strong> ${row.outcome || ""}</div>
+      <div class="line4"><strong>Follow-up:</strong> ${row.follow_up_action || ""}</div>
+    `;
+    formView.appendChild(card);
+  });
+}
+
+document.querySelectorAll("th input").forEach(input => {
+  input.addEventListener("input", () => {
+    const filters = {};
+    document.querySelectorAll("th input").forEach(f => {
+      filters[f.dataset.col] = f.value;
+    });
+    loadRecords(filters);
+  });
+});
+
+document.getElementById("gridViewBtn").onclick = () => {
+  gridView.style.display = "block";
+  formView.style.display = "none";
+};
+
+document.getElementById("formViewBtn").onclick = () => {
+  gridView.style.display = "none";
+  formView.style.display = "block";
+};
+</script>
+
+</body>
+</html>
