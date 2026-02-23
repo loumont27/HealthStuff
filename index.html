@@ -192,11 +192,9 @@ async function checkSession() {
   }
 }
 
-eventForm.addEventListener("keydown", function (e) {
-  if (e.key === "Enter") {
-    if (e.target.tagName !== "TEXTAREA") {
-      e.preventDefault();
-    }
+document.getElementById("eventForm").addEventListener("keydown", function (e) {
+  if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") {
+    e.preventDefault();
   }
 });
   
