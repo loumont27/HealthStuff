@@ -192,6 +192,14 @@ async function checkSession() {
   }
 }
 
+eventForm.addEventListener("keydown", function (e) {
+  if (e.key === "Enter") {
+    if (e.target.tagName !== "TEXTAREA") {
+      e.preventDefault();
+    }
+  }
+});
+  
 loginForm.addEventListener("submit", async e => {
   e.preventDefault();
   const email = document.getElementById("email").value;
