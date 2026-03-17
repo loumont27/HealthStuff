@@ -46,6 +46,12 @@ button {
 
 button:hover { background: #45a049; }
 
+button.secondary {
+  background: #666;
+}
+
+button.secondary:hover { background: #555; }
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -69,6 +75,15 @@ th input {
 
 tr:nth-child(even) { background-color: #f2f2f2; }
 
+.selectable-row {
+  cursor: pointer;
+}
+
+.selected-record {
+  outline: 2px solid #4CAF50;
+  background-color: #e7f6ea !important;
+}
+
 .view-toggle {
   margin-bottom: 15px;
 }
@@ -88,8 +103,15 @@ tr:nth-child(even) { background-color: #f2f2f2; }
 
 .line2, .line3, .line4 {
   white-space: pre-wrap;
-}{
   margin-bottom: 4px;
+}
+
+.edit-banner {
+  margin-top: 8px;
+  padding: 8px;
+  background: #eef7ff;
+  border: 1px solid #cfe6ff;
+  border-radius: 6px;
 }
 
 @media(max-width: 768px) {
@@ -130,8 +152,10 @@ tr:nth-child(even) { background-color: #f2f2f2; }
   <textarea name="general_note" placeholder="General Note"></textarea>
   <textarea name="outcome" placeholder="Outcome"></textarea>
   <textarea name="follow_up_action" placeholder="Follow-up Action"></textarea>
-  <button type="submit">Add Record</button>
+  <button type="submit" id="submitBtn">Add Record</button>
 </form>
+<button type="button" id="cancelEditBtn" class="secondary" style="display:none; margin-top:8px;">Cancel Edit</button>
+<div id="editBanner" class="edit-banner" style="display:none;"></div>
 </section>
 
 <section>
@@ -140,6 +164,8 @@ tr:nth-child(even) { background-color: #f2f2f2; }
 <div class="view-toggle">
   <button id="gridViewBtn">Grid View</button>
   <button id="formViewBtn">Form View</button>
+  <button id="editModeBtn" class="secondary">Edit Mode: Off</button>
+  <span id="editStatus" style="margin-left:8px;"></span>
 </div>
 
 <!-- GRID VIEW -->
@@ -178,9 +204,18 @@ const loginForm = document.getElementById("loginForm");
 const logoutBtn = document.getElementById("logoutBtn");
 const authStatus = document.getElementById("authStatus");
 const eventForm = document.getElementById("eventForm");
+const submitBtn = document.getElementById("submitBtn");
+const cancelEditBtn = document.getElementById("cancelEditBtn");
+const editBanner = document.getElementById("editBanner");
+const editModeBtn = document.getElementById("editModeBtn");
+const editStatus = document.getElementById("editStatus");
 const tbody = document.querySelector("#recordsTable tbody");
 const formView = document.getElementById("formView");
 const gridView = document.getElementById("gridView");
+
+let cachedRecords = [];
+let editMode = false;
+let editId = null;
 
 checkSession();
 
@@ -224,11 +259,31 @@ eventForm.addEventListener("submit", async e => {
   e.preventDefault();
   const formData = Object.fromEntries(new FormData(eventForm));
 
-  const { error } = await client.from(tableName).insert([formData]);
+  let error;
+  if (editId) {
+    const result = await client
+      .from(tableName)
+      .update(formData)
+      .eq("id", editId)
+      .select();
+    error = result.error;
+    if (!error && (!result.data || result.data.length === 0)) {
+      error = { message: "No record updated. Check permissions or record id." };
+    }
+  } else {
+    const result = await client.from(tableName).insert([formData]);
+    error = result.error;
+  }
 
-  if (error) alert(error.message);
+  if (error) {
+    alert(error.message);
+    return;
+  }
   else {
     eventForm.reset();
+    clearEditState();
+    editBanner.textContent = "Changes saved.";
+    editBanner.style.display = "block";
     loadRecords();
   }
 });
@@ -249,6 +304,7 @@ async function loadRecords(filters = {}) {
     return;
   }
 
+  cachedRecords = data || [];
   renderGrid(data);
   renderFormView(data);
 }
@@ -257,6 +313,8 @@ function renderGrid(data) {
   tbody.innerHTML = "";
   data.forEach(row => {
     const tr = document.createElement("tr");
+    tr.className = "selectable-row";
+    tr.dataset.id = row.id ?? "";
     tr.innerHTML = `
       <td>${row.event_type || ""}</td>
       <td>${row.event_date || ""}</td>
@@ -266,6 +324,7 @@ function renderGrid(data) {
       <td>${row.outcome || ""}</td>
       <td>${row.follow_up_action || ""}</td>
     `;
+    tr.addEventListener("click", () => handleRecordClick(row.id));
     tbody.appendChild(tr);
   });
 }
@@ -275,6 +334,8 @@ function renderFormView(data) {
   data.forEach(row => {
     const card = document.createElement("div");
     card.className = "record-card";
+    card.classList.add("selectable-row");
+    card.dataset.id = row.id ?? "";
     card.innerHTML = `
       <div class="line1">
         ${row.event_type || ""} | ${row.event_date || ""} | ${row.doctor_provider || ""} | ${row.location || ""}
@@ -283,6 +344,7 @@ function renderFormView(data) {
       <div class="line3"><strong>Outcome:</strong> ${row.outcome || ""}</div>
       <div class="line4"><strong>Follow-up:</strong> ${row.follow_up_action || ""}</div>
     `;
+    card.addEventListener("click", () => handleRecordClick(row.id));
     formView.appendChild(card);
   });
 }
@@ -306,6 +368,71 @@ document.getElementById("formViewBtn").onclick = () => {
   gridView.style.display = "none";
   formView.style.display = "block";
 };
+
+editModeBtn.onclick = () => {
+  editMode = !editMode;
+  if (!editMode) {
+    clearEditState();
+  }
+  updateEditModeUI();
+};
+
+cancelEditBtn.onclick = () => {
+  clearEditState();
+  updateEditModeUI();
+};
+
+function updateEditModeUI() {
+  editModeBtn.textContent = editMode ? "Edit Mode: On" : "Edit Mode: Off";
+  editStatus.textContent = editMode ? "Select a record to edit." : "";
+  cancelEditBtn.style.display = editId ? "block" : "none";
+  editBanner.style.display = editId ? "block" : "none";
+  submitBtn.textContent = editId ? "Save Changes" : "Add Record";
+  syncSelectedStyles();
+}
+
+function handleRecordClick(id) {
+  if (!editMode) return;
+  if (!id) {
+    alert("This record cannot be edited (missing id).");
+    return;
+  }
+  const record = cachedRecords.find(r => r.id === id);
+  if (!record) return;
+  editId = id;
+  populateForm(record);
+  editBanner.textContent = `Editing record ${id}. Update fields and click Save Changes.`;
+  updateEditModeUI();
+}
+
+function populateForm(record) {
+  eventForm.elements["event_type"].value = record.event_type || "";
+  eventForm.elements["event_date"].value = record.event_date || "";
+  eventForm.elements["doctor_provider"].value = record.doctor_provider || "";
+  eventForm.elements["location"].value = record.location || "";
+  eventForm.elements["general_note"].value = record.general_note || "";
+  eventForm.elements["outcome"].value = record.outcome || "";
+  eventForm.elements["follow_up_action"].value = record.follow_up_action || "";
+}
+
+function clearEditState() {
+  editId = null;
+  eventForm.reset();
+  editBanner.textContent = "";
+  updateEditModeUI();
+}
+
+function syncSelectedStyles() {
+  document.querySelectorAll(".selected-record").forEach(el => {
+    el.classList.remove("selected-record");
+  });
+  if (!editId) return;
+  document.querySelectorAll(`[data-id="${editId}"]`).forEach(el => {
+    el.classList.add("selected-record");
+  });
+}
+
+updateEditModeUI();
 </script>
 
 </body>
